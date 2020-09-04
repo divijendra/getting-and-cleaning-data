@@ -1,46 +1,86 @@
-packages <- c("data.table", "reshape2")
-sapply(packages, require, character.only=TRUE, quietly=TRUE)
-path <- getwd()
-url <- "https://d396qusza40orc.cloudfront.net/getdata%2Fprojectfiles%2FUCI%20HAR%20Dataset.zip"
-download.file(url, file.path(path, "dataFiles.zip"))
-unzip(zipfile = "dataFiles.zip")
+#Read in label files
+actLab <- read.table('./UCI HAR Dataset/activity_labels.txt', 
+                     col.names = c('activityLabels', 'activityName'), quote = "")
+#Links the class labels with their activity name
+features <- read.table('./UCI HAR Dataset/features.txt', 
+                       col.names = c('featureLabels', 'featureName'), quote = "")
+#List of all features
 
-# Load activity labels + features
-activityLabels <- fread(file.path(path, "UCI HAR Dataset/activity_labels.txt")
-                        , col.names = c("classLabels", "activityName"))
-features <- fread(file.path(path, "UCI HAR Dataset/features.txt")
-                  , col.names = c("index", "featureNames"))
-featuresWanted <- grep("(mean|std)\\(\\)", features[, featureNames])
-measurements <- features[featuresWanted, featureNames]
-measurements <- gsub('[()]', '', measurements)
+#Read in test data
+subTest <- read.table('./UCI HAR Dataset/test/subject_test.txt', col.names = c('subjectId'))
+#Each row identifies the subject who performed the activity for each window sample. 
+#Its range is from 1 to 30.
+XTest <- read.table('./UCI HAR Dataset/test/X_test.txt')
+#Measurements for the test data (features)
+yTest <- read.table('./UCI HAR Dataset/test/y_test.txt')
+#Result for the test data (outcomes)
 
-# Load train datasets
-train <- fread(file.path(path, "UCI HAR Dataset/train/X_train.txt"))[, featuresWanted, with = FALSE]
-data.table::setnames(train, colnames(train), measurements)
-trainActivities <- fread(file.path(path, "UCI HAR Dataset/train/Y_train.txt")
-                         , col.names = c("Activity"))
-trainSubjects <- fread(file.path(path, "UCI HAR Dataset/train/subject_train.txt")
-                       , col.names = c("SubjectNum"))
-train <- cbind(trainSubjects, trainActivities, train)
+#Combine all test data and give column names
+colnames(XTest) <- features$featureName
+colnames(yTest) <- c('activityLabels')
+testData <- cbind(subTest, XTest, yTest)
 
-# Load test datasets
-test <- fread(file.path(path, "UCI HAR Dataset/test/X_test.txt"))[, featuresWanted, with = FALSE]
-data.table::setnames(test, colnames(test), measurements)
-testActivities <- fread(file.path(path, "UCI HAR Dataset/test/Y_test.txt")
-                        , col.names = c("Activity"))
-testSubjects <- fread(file.path(path, "UCI HAR Dataset/test/subject_test.txt")
-                      , col.names = c("SubjectNum"))
-test <- cbind(testSubjects, testActivities, test)
+#Read in training data
+subTrain <- read.table('./UCI HAR Dataset/train/subject_train.txt', col.names = c('subjectId'))
+XTrain <- read.table('./UCI HAR Dataset/train/X_train.txt')
+yTrain <- read.table('./UCI HAR Dataset/train/y_train.txt')
 
-# merge datasets
-combined <- rbind(train, test)
+#Combine all training data and give column names
+colnames(XTrain) <- features$featureName
+colnames(yTrain) <- c('activityLabels')
+trainData <- cbind(subTrain, XTrain, yTrain)
 
-# Convert classLabels to activityName basically. More explicit. 
-combined[["Activity"]] <- factor(combined[, Activity]
-                                 , levels = activityLabels[["classLabels"]]
-                                 , labels = activityLabels[["activityName"]])
-combined[["SubjectNum"]] <- as.factor(combined[, SubjectNum])
-combined <- reshape2::melt(data = combined, id = c("SubjectNum", "Activity"))
-combined <- reshape2::dcast(data = combined, SubjectNum + Activity ~ variable, fun.aggregate = mean)
+#Combine test and training data
+allData <- rbind(trainData, testData)
 
-data.table::fwrite(x = combined, file = "tidyData.txt", quote = FALSE)
+
+#-----------------------------------------------------------------------
+#PART TWO
+#Extracts only the measurements on the mean and standard deviation for each measurement.
+#-----------------------------------------------------------------------
+
+
+meanSdData <- allData[, c(1, grep(pattern = 'mean\\(\\)|std\\(\\)', x = names(allData)), 563)]
+#select only variables with mean and std - excludes meanFreq() and angle()
+#(refer to features_info.txt for more information)
+#also include the subject ID (col = 1) and activity code (col = 563)
+
+
+#-----------------------------------------------------------------------
+#PART THREE
+#Use descriptive activity names to name the activities in the data set.
+#-----------------------------------------------------------------------
+
+meanSdData$subjectId <- as.factor(meanSdData$subjectId)
+meanSdData$activity <- factor(meanSdData$activityLabels,
+                              levels = actLab$activityLabels,
+                              labels = actLab$activityName)
+#make a new column that considers the activityLabels column a factor of 6 levels, 
+#with the label the same as the activity name
+meanSdData <- meanSdData[, -68]
+#remove the activity labels column to tidy up the data
+names(meanSdData)
+#double check that the activityLabels column is gone
+
+
+#-----------------------------------------------------------------------
+#PART FOUR
+#Appropriately labels the data set with descriptive variable names.
+#-----------------------------------------------------------------------
+
+
+colnames(meanSdData) <- gsub(pattern = '\\(\\)', replacement = "", x = names(meanSdData))
+#remove the () for the mean and std in the measurements
+meanSdData <- meanSdData[, c(1, 68, 2:67)]
+#move the activity column to the second column
+write.table(meanSdData, file = 'tidyData.txt', row.names = F, quote = F, sep = "\t")
+
+#-----------------------------------------------------------------------
+#PART FIVE
+#From the data set in step 4, creates a second, independent tidy data set with 
+#the average of each variable for each activity and each subject.
+#-----------------------------------------------------------------------
+
+library(dplyr)
+meanSdDataByIdAct <- group_by(meanSdData, subjectId, activity) %>% summarise_all(funs(mean))
+write.table(meanSdDataByIdAct, file = 'tidyDataMean.txt', row.names = F, quote = F, sep = "\t")
